@@ -13,7 +13,7 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from dateutil import tz
 from io import StringIO
-
+print('hi')
 
 # 自訂表頭
 my_headers = {'CK': 'DKRKZ44S2070YUTSKR'}
