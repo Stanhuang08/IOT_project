@@ -85,24 +85,18 @@ def typechange(x):
     ss = str(ii)
     return ss
 
-SYS_path = os.path.dirname(os.path.abspath(__file__))
-CHANNEL_LIST = pd.read_excel(SYS_path + "/Channel_List.xlsx", engine = 'openpyxl')
-CHANNEL_LIST = CHANNEL_LIST.loc[CHANNEL_LIST['Online'] == 'Y'] 
-#print(CHANNEL_LIST)
-CHANNEL_LIST['IOT_CHANNEL_ID'] = CHANNEL_LIST['IOT Channel ID'].apply(typechange)
-CHANNEL_LIST['TS_ID_DB'] = CHANNEL_LIST['TS_ID(FOR DB)'].apply(typechange)
-#print(CHANNEL_LIST['IOT_CHANNEL_ID'])
-
-field = list(range(1,9))
-
 
 def get_data(a):
     df = pd.DataFrame()
-    for i in field:
+    today = datetime.date.today()
+    #today = '2021-03-17'
+    startday = today - datetime.timedelta(days=2)
+    #startday = '2021-03-15'
+    for i in list(range(1,9)):
         my_headers = {'CK': CHANNEL_LIST['Read API Keys'][a]}
         channelid = CHANNEL_LIST['IOT_CHANNEL_ID'][a]
 
-        r = requests.get('https://iot.cht.com.tw/iot/v1/device/'+channelid+'/sensor/'+str(i)+'/rawdata?start=2021-03-16T16%3A00%3A00Z&end=2021-03-18T16%3A12%3A00Z&utcOffset=8', headers = my_headers)
+        r = requests.get('https://iot.cht.com.tw/iot/v1/device/'+channelid+'/sensor/'+str(i)+'/rawdata?start='+str(startday)+'T16%3A00%3A00Z&end='+str(today)+'T16%3A12%3A00Z&utcOffset=8', headers = my_headers)
 
         #print(r.status_code)
 
@@ -135,21 +129,18 @@ def get_data(a):
     df = df.drop(columns = 'd')
     df['new_time'] = df['time'].apply(time_change)
     return df 
-#df1.columns = ['d', 'deviceID', 'time', 'ID', 'd', 'd', 'd', 'voltage', 'd', 'd', 'd', 'tilt', 'd', 'd', 'd', 'w_25', 'd', 'd', 'd', 'w_60', 'd', 'd', 'd', 's_v', 'd', 'd', 'd', 'f7', 'd', 'd', 'd', 'f8']
-#df1 = df1.drop(columns = 'd')
-#df1['new_time'] = df1['time'].apply(time_change)
-#print(df1)
 
-#print(get_data(0, df1))
+def sort_out_new_data(a, b ,c ,d):
+    latest_result0 = a.tail(1)      
+    latest_result1 = b.tail(1)     
+    latest_result2 = c.tail(1)      
+    latest_result3 = d.tail(1)
+    aa = latest_result0.append(latest_result1)
+    aa = aa.append(latest_result2)
+    aa = aa.append(latest_result3)
+    aa = aa.reset_index(drop=True)
+    return aa
 
-df0 = get_data(0)
-df1 = get_data(1)
-df2 = get_data(2)
-df3 = get_data(3)
-#print(df1)
-#print(df2)
-#print(df3)
-dbname = Path(SYS_path + '/Database.mdb')
 
 def insert_db(a, df):
     try:
@@ -179,64 +170,78 @@ def insert_db(a, df):
             cnxn.commit()
     print('ID',a,'數據寫入完成')
 
-def sort_out_new_data(a, b ,c ,d):
-    latest_result0 = a.tail(1)      
-    latest_result1 = b.tail(1)     
-    latest_result2 = c.tail(1)      
-    latest_result3 = d.tail(1)
-    aa = latest_result0.append(latest_result1)
-    aa = aa.append(latest_result2)
-    aa = aa.append(latest_result3)
-    aa = aa.reset_index(drop=True)
-    return aa
 
+def main_func():
+    df0 = get_data(0)
+    df1 = get_data(1)
+    df2 = get_data(2)
+    df3 = get_data(3)
+    insert_db(0, df0)
+    insert_db(1, df1)
+    insert_db(2, df2)
+    insert_db(3, df3)
+    df_STATUS_TABLE = pd.DataFrame()
+    df_STATUS_TABLE = sort_out_new_data(df0, df1, df2 ,df3)
+    df_STATUS_TABLE.columns = ['deviceID', 'created_at', 'field1', 'field2', 'field3', 'field4', 'field5', 'field6', 'field7', 'field8', 'localtime']
+
+    run_status = []
+    for i in range(0,4):    
+        now_Sync = datetime.datetime.now()  
+        data_lag = now_Sync - datetime.datetime.strptime(str(df_STATUS_TABLE['created_at'][i]), '%Y-%m-%d %H:%M:%S.%f')
+        data_lag_day = data_lag.days*24
+        data_lag_second = data_lag.seconds/3600        
+        data_lag = data_lag_day + data_lag_second
+
+        if data_lag < Sync_Abnormal_Time or now_Sync <=  datetime.datetime.strptime(str(df_STATUS_TABLE['created_at'][i]), '%Y-%m-%d %H:%M:%S.%f'):
+            run_status.append('正常')
+        else:
+            run_status.append('異常')
+    df_STATUS_TABLE['儀器狀態'] = run_status
+
+    df_STATUS_TABLE = pd.concat([CHANNEL_LIST, df_STATUS_TABLE], axis = 1)
+    df_STATUS_TABLE = df_STATUS_TABLE.replace(to_replace='end', value='0', regex=True)
+
+    df_STATUS_TABLE["電池百分比"] = df_STATUS_TABLE.apply(lambda row: get_battery_level(float(row['field2']), float(row['電池電壓(最大)']), float(row['電池電壓(最小)'])),axis=1)
+    df_STATUS_TABLE["水位深度"] = df_STATUS_TABLE.apply(lambda row: water_level(float(row['高程']),float(row['field8']),float(row['field3']),str(row['模組'])),axis=1)
+    df_STATUS_TABLE["水位高程"] = df_STATUS_TABLE.apply(lambda row: t_water_level(float(row['field8']),float(row['field7']),str(row['模組'])),axis=1)
+    df_STATUS_TABLE["傾角1"] = df_STATUS_TABLE.apply(lambda row:get_true_angle(row['field3'], row['傾角1初始值'], str(row['傾角1判定'])) ,axis=1)
+    df_STATUS_TABLE["傾角2"] = df_STATUS_TABLE.apply(lambda row:get_true_angle(row['field4'], row['傾角2初始值'], str(row['傾角2判定'])) ,axis=1)
+
+    df_STATUS_TABLE["水位管理值判定"] = df_STATUS_TABLE.apply(lambda row: check_control_value('水位',float(row['水位深度']), float(row['預警值(水位)']), float(row['警戒值(水位)']), str(row['水位判定'])),axis=1)
+    df_STATUS_TABLE["傾角1管理值判定"] = df_STATUS_TABLE.apply(lambda row: check_angle_value(row['傾角1'], row['預警值(傾角)'], row['警戒值(傾角)'], str(row['傾角1判定'])),axis=1)
+    df_STATUS_TABLE["傾角2管理值判定"] = df_STATUS_TABLE.apply(lambda row: check_angle_value(row['傾角2'], row['預警值(傾角)'], row['警戒值(傾角)'],  str(row['傾角2判定'])),axis=1)
+    #print(df_STATUS_TABLE)
+    STATUS_TABLE_Path = SYS_path + '/STATUS_TABLE_OUTPUT/' + 'Monitoring_Status.xlsx'   
+    writer = pd.ExcelWriter(STATUS_TABLE_Path)
+    df_STATUS_TABLE.to_excel(writer,'Sheet1')
+    writer.save()  
+    print(datetime.datetime.today(),'資料更新完成')
+
+SYS_path = os.path.dirname(os.path.abspath(__file__))
+CHANNEL_LIST = pd.read_excel(SYS_path + "/Channel_List.xlsx", engine = 'openpyxl')
+CHANNEL_LIST = CHANNEL_LIST.loc[CHANNEL_LIST['Online'] == 'Y'] 
+CHANNEL_LIST['IOT_CHANNEL_ID'] = CHANNEL_LIST['IOT Channel ID'].apply(typechange)
+CHANNEL_LIST['TS_ID_DB'] = CHANNEL_LIST['TS_ID(FOR DB)'].apply(typechange)
+dbname = Path(SYS_path + '/Database.mdb')
 SYS_var = pd.read_excel(SYS_path + '/Setting.xlsx', engine = 'openpyxl')
 Sync_Freq = SYS_var['Sync_Freq(min)'][0]
 Sync_Abnormal_Time = int(SYS_var['異常時間準則(小時)'][0])
+#df1.columns = ['d', 'deviceID', 'time', 'ID', 'd', 'd', 'd', 'voltage', 'd', 'd', 'd', 'tilt', 'd', 'd', 'd', 'w_25', 'd', 'd', 'd', 'w_60', 'd', 'd', 'd', 's_v', 'd', 'd', 'd', 'f7', 'd', 'd', 'd', 'f8']
+#df1 = df1.drop(columns = 'd')
+#df1['new_time'] = df1['time'].apply(time_change)
+#print(df1)
+
+#print(get_data(0, df1))
 
 
-df_STATUS_TABLE = pd.DataFrame()
-df_STATUS_TABLE = sort_out_new_data(df0, df1, df2 ,df3)
-df_STATUS_TABLE.columns = ['deviceID', 'created_at', 'field1', 'field2', 'field3', 'field4', 'field5', 'field6', 'field7', 'field8', 'localtime']
+#df0 = get_data(0)
+#df1 = get_data(1)
+#df2 = get_data(2)
+#df3 = get_data(3)
+#print(df1)
+#print(df2)
+#print(df3)
 
-run_status = []
-for i in range(0,4):    
-    now_Sync = datetime.datetime.now()  
-    data_lag = now_Sync - datetime.datetime.strptime(str(df_STATUS_TABLE['created_at'][i]), '%Y-%m-%d %H:%M:%S.%f')
-    data_lag_day = data_lag.days*24
-    data_lag_second = data_lag.seconds/3600        
-    data_lag = data_lag_day + data_lag_second
-
-    if data_lag < Sync_Abnormal_Time or now_Sync <=  datetime.datetime.strptime(str(df_STATUS_TABLE['created_at'][i]), '%Y-%m-%d %H:%M:%S.%f'):
-        run_status.append('正常')
-    else:
-        run_status.append('異常')
-df_STATUS_TABLE['儀器狀態'] = run_status
-
-df_STATUS_TABLE = pd.concat([CHANNEL_LIST, df_STATUS_TABLE], axis = 1)
-df_STATUS_TABLE = df_STATUS_TABLE.replace(to_replace='end', value='0', regex=True)
-
-
-
-df_STATUS_TABLE["電池百分比"] = df_STATUS_TABLE.apply(lambda row: get_battery_level(float(row['field2']), float(row['電池電壓(最大)']), float(row['電池電壓(最小)'])),axis=1)
-df_STATUS_TABLE["水位深度"] = df_STATUS_TABLE.apply(lambda row: water_level(float(row['高程']),float(row['field8']),float(row['field3']),str(row['模組'])),axis=1)
-df_STATUS_TABLE["水位高程"] = df_STATUS_TABLE.apply(lambda row: t_water_level(float(row['field8']),float(row['field7']),str(row['模組'])),axis=1)
-df_STATUS_TABLE["傾角1"] = df_STATUS_TABLE.apply(lambda row:get_true_angle(row['field3'], row['傾角1初始值'], str(row['傾角1判定'])) ,axis=1)
-df_STATUS_TABLE["傾角2"] = df_STATUS_TABLE.apply(lambda row:get_true_angle(row['field4'], row['傾角2初始值'], str(row['傾角2判定'])) ,axis=1)
-
-df_STATUS_TABLE["水位管理值判定"] = df_STATUS_TABLE.apply(lambda row: check_control_value('水位',float(row['水位深度']), float(row['預警值(水位)']), float(row['警戒值(水位)']), str(row['水位判定'])),axis=1)
-df_STATUS_TABLE["傾角1管理值判定"] = df_STATUS_TABLE.apply(lambda row: check_angle_value(row['傾角1'], row['預警值(傾角)'], row['警戒值(傾角)'], str(row['傾角1判定'])),axis=1)
-df_STATUS_TABLE["傾角2管理值判定"] = df_STATUS_TABLE.apply(lambda row: check_angle_value(row['傾角2'], row['預警值(傾角)'], row['警戒值(傾角)'],  str(row['傾角2判定'])),axis=1)
-print(df_STATUS_TABLE)
-STATUS_TABLE_Path = SYS_path + '/STATUS_TABLE_OUTPUT/' + 'Monitoring_Status.xlsx'   
-writer = pd.ExcelWriter(STATUS_TABLE_Path)
-df_STATUS_TABLE.to_excel(writer,'Sheet1')
-writer.save()  
-
-
-
-
-
-
+main_func()
 
 
