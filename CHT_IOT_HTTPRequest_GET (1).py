@@ -226,22 +226,17 @@ dbname = Path(SYS_path + '/Database.mdb')
 SYS_var = pd.read_excel(SYS_path + '/Setting.xlsx', engine = 'openpyxl')
 Sync_Freq = SYS_var['Sync_Freq(min)'][0]
 Sync_Abnormal_Time = int(SYS_var['異常時間準則(小時)'][0])
-#df1.columns = ['d', 'deviceID', 'time', 'ID', 'd', 'd', 'd', 'voltage', 'd', 'd', 'd', 'tilt', 'd', 'd', 'd', 'w_25', 'd', 'd', 'd', 'w_60', 'd', 'd', 'd', 's_v', 'd', 'd', 'd', 'f7', 'd', 'd', 'd', 'f8']
-#df1 = df1.drop(columns = 'd')
-#df1['new_time'] = df1['time'].apply(time_change)
-#print(df1)
 
-#print(get_data(0, df1))
+now = datetime.datetime.now()
+now_plus_1 = now + datetime.timedelta(minutes = 1)
+#main_func()
 
-
-#df0 = get_data(0)
-#df1 = get_data(1)
-#df2 = get_data(2)
-#df3 = get_data(3)
-#print(df1)
-#print(df2)
-#print(df3)
-
-main_func()
+if __name__ == '__main__':
+  
+    scheduler = BlockingScheduler(misfire_grace_time=1200, coalesce=True)
+    trigger = IntervalTrigger(minutes = int(Sync_Freq), start_date= str(now_plus_1))
+    scheduler.add_job(main_func,trigger,id='main_func', max_instances=999)
+    print('Press Ctrl+{0} to exit'.format('Break' if os.name == 'nt' else 'C'))
+    scheduler.start()
 
 
