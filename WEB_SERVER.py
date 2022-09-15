@@ -1,12 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Tue Jun 25 11:21:21 2019
-
-@author: Makuro
-"""
-
-# -*- coding: utf-8 -*-
-
 import dash
 from dash.dependencies import Input, Output
 import dash_core_components as dcc
